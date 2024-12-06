@@ -1,0 +1,12 @@
+# Binaries
+/backend/backend
+
+# Logs
+/backend/*.log
+
+# Dependency directories
+/backend/vendor/
+
+# OS files
+.DS_Store
+Thumbs.db
