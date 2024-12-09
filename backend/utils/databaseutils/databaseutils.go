@@ -23,7 +23,6 @@ func DatabaseMigration(session *gocql.Session) error {
             admin_from TIMESTAMP,
             admin_until TIMESTAMP
             )`,
-        "remove_jwt_keys": `DROP TABLE IF EXISTS jwt_keys`,
         "jwt_keys": `CREATE TABLE IF NOT EXISTS jwt_keys (
             kid UUID PRIMARY KEY,
             secret TEXT,
@@ -116,44 +115,5 @@ func ensureDefaultAdminUser(session *gocql.Session) error {
         log.Println("Admin entry for default admin user created successfully.")
     }
 
-    return nil
-}
-
-
-func InitialiseCassandraConnection() (*gocql.Session, error) {
-    cluster := gocql.NewCluster("127.0.0.1")
-    cluster.Consistency = gocql.Quorum
-
-    // Connect to Cassandra without a keyspace first
-    session, err := cluster.CreateSession()
-    if err != nil {
-        return nil, fmt.Errorf("failed to connect to Cassandra: %w", err)
-    }
-
-    log.Println("Ensuring keyspace exists...")
-    if err := ensureKeyspace(session); err != nil {
-        session.Close()
-        return nil, fmt.Errorf("failed to ensure keyspace: %w", err)
-    }
-    session.Close()
-
-    // Reconnect with the keyspace
-    cluster.Keyspace = "mykeyspace"
-    session, err = cluster.CreateSession()
-    if err != nil {
-        return nil, fmt.Errorf("failed to connect to Cassandra keyspace: %w", err)
-    }
-
-    return session, nil
-}
-
-func ensureKeyspace(session *gocql.Session) error {
-    keyspaceQuery := `CREATE KEYSPACE IF NOT EXISTS mykeyspace WITH replication = {
-        'class': 'SimpleStrategy',
-        'replication_factor': 1
-    }`
-    if err := session.Query(keyspaceQuery).Exec(); err != nil {
-        return fmt.Errorf("failed to create keyspace: %w", err)
-    }
     return nil
 }
