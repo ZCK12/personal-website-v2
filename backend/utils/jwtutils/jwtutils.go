@@ -5,6 +5,7 @@ import (
     "encoding/base64"
     "fmt"
     "time"
+    "log"
 
     "github.com/gocql/gocql"
     "github.com/golang-jwt/jwt/v5"
@@ -18,14 +19,14 @@ const (
 
 // JWTToken represents a JWT token and its associated data
 type JWTToken struct {
-    KID       string
-    Secret    string
-    CreatedAt time.Time
+    KID        string
+    Secret     string
+    CreatedAt  time.Time
     ValidUntil time.Time
 }
 
 // GenerateJWT creates a JWT signed with the most recent key or generates a new one if none exist
-func GenerateJWT(session *gocql.Session, userId string) (string, error) {
+func GenerateJWT(session *gocql.Session, userId gocql.UUID) (string, error) {
     // Try to fetch the latest valid key
     key, err := fetchLatestKey(session)
     if err != nil || time.Now().After(key.ValidUntil) {
@@ -37,7 +38,7 @@ func GenerateJWT(session *gocql.Session, userId string) (string, error) {
     }
 
     token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-        "userId": userId,
+        "userId": userId.String(),
         "exp":    time.Now().Add(time.Hour * JWT_EXPIRATION_HOURS).Unix(),
     })
 
@@ -47,11 +48,11 @@ func GenerateJWT(session *gocql.Session, userId string) (string, error) {
 }
 
 // ValidateJWT validates a JWT and retrieves the userId from its claims
-func ValidateJWT(session *gocql.Session, tokenString string) (string, error) {
+func ValidateJWT(session *gocql.Session, tokenString string) (gocql.UUID, error) {
     token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
         kid, ok := token.Header["kid"].(string)
         if !ok {
-            return nil, fmt.Errorf("missing kid in token header")
+            return gocql.UUID{}, fmt.Errorf("missing kid in token header")
         }
 
         var secret string
@@ -60,70 +61,112 @@ func ValidateJWT(session *gocql.Session, tokenString string) (string, error) {
             "SELECT secret, valid_until FROM jwt_keys WHERE kid = ?",
             kid,
         ).Scan(&secret, &validUntil); err != nil {
-            return nil, fmt.Errorf("failed to fetch signing key: %v", err)
+            return gocql.UUID{}, fmt.Errorf("failed to fetch signing key: %v", err)
         }
 
         if time.Now().After(validUntil) {
-            return nil, fmt.Errorf("key is no longer valid")
+            return gocql.UUID{}, fmt.Errorf("key is no longer valid")
         }
 
         return []byte(secret), nil
     })
 
     if err != nil || !token.Valid {
-        return "", fmt.Errorf("invalid token: %v", err)
+        return gocql.UUID{}, fmt.Errorf("invalid token: %v", err)
     }
 
     claims, ok := token.Claims.(jwt.MapClaims)
     if !ok {
-        return "", fmt.Errorf("invalid token claims")
+        return gocql.UUID{}, fmt.Errorf("invalid token claims")
     }
 
     userId, ok := claims["userId"].(string)
     if !ok {
-        return "", fmt.Errorf("userId not found in token claims")
+        return gocql.UUID{}, fmt.Errorf("userId not found in token claims")
     }
 
-    return userId, nil
+    parsedUserId, err := gocql.ParseUUID(userId)
+    if err != nil {
+        return gocql.UUID{}, fmt.Errorf("userId could not be parsed as Cassandra UUID !")
+    }
+
+    return parsedUserId, nil
 }
 
-// RotateKey creates a new signing key by calling generateNewKey
-func RotateKey(session *gocql.Session) (string, error) {
+// RotateKey creates a new signing key
+func RotateKey(session *gocql.Session) (*JWTToken, error) {
     return generateNewKey(session)
 }
 
-func InvalidateKey(session *gocql.Session) (string, error) {
-    // Fetch the latest key (ensure fetchLatestKey is implemented properly)
-    kid, secret, createdAt, err := fetchLatestKey(session)
-    if err != nil {
-        return "", fmt.Errorf("failed to fetch latest key: %v", err)
+// InvalidateAllKeys invalidates all currently valid keys by updating their valid_until timestamps
+func InvalidateAllKeys(session *gocql.Session) error {
+    // Fetch all keys
+    iter := session.Query(
+        "SELECT kid, valid_until FROM jwt_keys",
+    ).Iter()
+
+    var (
+        now          = time.Now().UTC()
+        kid          gocql.UUID
+        validUntil   time.Time
+        invalidated  []gocql.UUID
+    )
+
+    // Collect keys that are still valid
+    for iter.Scan(&kid, &validUntil) {
+        if validUntil.After(now) {
+            invalidated = append(invalidated, kid)
+        }
     }
 
-    // Calculate the new valid_until time (invalidate immediately)
-    validUntil := time.Now().UTC()
-
-    // Update the latest key's valid_until time across all nodes
-    query := "UPDATE jwt_keys SET valid_until = ? WHERE kid = ?"
-    if err := session.Query(query, validUntil, kid).Consistency(gocql.All).Exec(); err != nil {
-        return "", fmt.Errorf("failed to invalidate key: %v", err)
+    if err := iter.Close(); err != nil {
+        return fmt.Errorf("failed to fetch keys: %v", err)
     }
 
-    // Return the invalidated key ID for logging or further action
-    return kid, nil
+    if len(invalidated) == 0 {
+        log.Println("No currently valid keys found to invalidate.")
+        return nil
+    }
+
+    // Invalidate each key
+    for _, key := range invalidated {
+        log.Printf("Invalidating key: %s", key)
+        query := "UPDATE jwt_keys SET valid_until = ? WHERE kid = ?"
+        if err := session.Query(query, now, key).Consistency(gocql.All).Exec(); err != nil {
+            return fmt.Errorf("failed to invalidate key %s: %v", key, err)
+        }
+    }
+
+    log.Printf("Invalidated %d currently valid keys.", len(invalidated))
+    return nil
+}
+
+// TruncateKeysTable truncates the entire jwt_keys table, removing all entries.
+func TruncateKeysTable(session *gocql.Session) error {
+    log.Println("Truncating the jwt_keys table...")
+
+    // Execute the TRUNCATE command
+    query := "TRUNCATE TABLE jwt_keys"
+    if err := session.Query(query).Exec(); err != nil {
+        return fmt.Errorf("failed to truncate jwt_keys table: %v", err)
+    }
+
+    log.Println("Successfully truncated the jwt_keys table.")
+    return nil
 }
 
 // newJWTToken creates a new JWT token instance
-func newJWTToken(kid string, secret string, createdAt time.Time, validUntil time.Time) *JWTToken {
+func newJWTToken(kid, secret string, createdAt, validUntil time.Time) *JWTToken {
     return &JWTToken{
-        KID:       kid,
-        Secret:    secret,
-        CreatedAt: createdAt,
+        KID:        kid,
+        Secret:     secret,
+        CreatedAt:  createdAt,
         ValidUntil: validUntil,
     }
 }
 
 // generateNewKey creates a new cryptographically secure key and stores it in the database
-func generateNewKey(session *gocql.Session) (string, error) {
+func generateNewKey(session *gocql.Session) (*JWTToken, error) {
     kid := gocql.TimeUUID().String()
 
     // Generate a cryptographically secure random secret
@@ -143,7 +186,7 @@ func generateNewKey(session *gocql.Session) (string, error) {
         return nil, fmt.Errorf("failed to store new key: %v", err)
     }
 
-    return kid, nil
+    return newJWTToken(kid, secret, createdAt, validUntil), nil
 }
 
 // generateRandomSecret creates a cryptographically secure random secret of the specified length
@@ -157,19 +200,36 @@ func generateRandomSecret(length int) (string, error) {
     return base64.URLEncoding.EncodeToString(bytes), nil
 }
 
-// fetchLatestKey retrieves the latest signing key from the database
-func fetchLatestKey(session *gocql.Session) (string, error) {
-    var kid gocql.UUID
-    var secret string
-    var createdAt, validUntil time.Time
+// fetchLatestKey retrieves the most recent valid signing key from the database
+func fetchLatestKey(session *gocql.Session) (*JWTToken, error) {
+    iter := session.Query(
+        "SELECT kid, secret, created_at, valid_until FROM jwt_keys",
+    ).Iter()
 
-    err := session.Query(
-        "SELECT kid, secret, created_at, valid_until FROM jwt_keys ORDER BY created_at DESC LIMIT 1",
-    ).Scan(&kid, &secret, &createdAt, &validUntil)
+    var (
+        latestKey   *JWTToken
+        kid         string
+        secret      string
+        createdAt   time.Time
+        validUntil  time.Time
+    )
 
-    if err != nil {
-        return nil, fmt.Errorf("failed to fetch latest key: %v", err)
+    now := time.Now().UTC() // Current time for validation
+    for iter.Scan(&kid, &secret, &createdAt, &validUntil) {
+        if validUntil.After(now) && (latestKey == nil || createdAt.After(latestKey.CreatedAt)) {
+            // Only consider keys where valid_until > now and createdAt is the latest
+            latestKey = newJWTToken(kid, secret, createdAt, validUntil)
+        }
     }
 
-    return kid.String(), nil
+    if err := iter.Close(); err != nil {
+        return nil, fmt.Errorf("failed to iterate over keys: %v", err)
+    }
+
+    if latestKey == nil {
+        return nil, fmt.Errorf("no valid keys found")
+    }
+
+    return latestKey, nil
 }
+
