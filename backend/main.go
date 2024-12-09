@@ -9,6 +9,7 @@ import (
     "time"
 
     "github.com/ZCK12/personal-website-v2/backend/utils/databaseutils"
+    "github.com/ZCK12/personal-website-v2/backend/api/systemcontroller"
     "github.com/ZCK12/personal-website-v2/backend/api/usercontroller"
 
     "github.com/gocql/gocql"
@@ -33,19 +34,41 @@ func main() {
     log.Println("Database migration completed successfully.")
 
     // Initilise Controllers
+    sc := systemcontroller.NewSystemController(cassandraSession)
     uc := usercontroller.NewUserController(cassandraSession)
 
     r := chi.NewRouter()
 
     r.Route("/api", func(r chi.Router) {
-        r.Route("/users", func(r chi.Router) {
-            r.With(withParsedUserId).Get("/{userId}", uc.UserFetchHandler)
+        r.Get("/status", sc.SystemStatusHandler)
+        r.Get("/health", sc.SystemHealthHandler)
+        r.Post("/login", uc.LoginHandler)
+        r.Post("/logout", uc.LogoutHandler)
+
+        r.Route("/user", func(r chi.Router) {
             r.Post("/", uc.NewUserInsertionHandler)
+            r.With(uc.UserAuthenticationMiddleware).Get("/", uc.UserSelfFetchHandler)
+            r.With(uc.UserAuthenticationMiddleware).Delete("/", uc.UserSelfDeletionHandler)
+            r.With(uc.UserAuthenticationMiddleware).Put("/password", uc.UserSelfPasswordChangeHandler)
+            r.With(uc.UserAuthenticationMiddleware).Get("/referralcodes", uc.UserReferralCodeHandler)
         })
 
-        r.Post("/login", uc.LoginHandler)
+        r.Route("/admin", func(r chi.Router) {
+            r.Route("/users", func(r chi.Router) {
+                r.With(uc.AdminAuthenticationMiddleware).Get("/", uc.FetchAllUsersHandler)
+                r.With(uc.AdminAuthenticationMiddleware).With(withParsedUserId).Get("/{userId}", uc.UserFetchHandler)
+                r.With(uc.AdminAuthenticationMiddleware).With(withParsedUserId).Delete("/{userId}", uc.UserDeletionHandler)
+                r.With(uc.AdminAuthenticationMiddleware).With(withParsedUserId).Put("/{userId}/password", uc.PasswordChangeHandler)
+                r.With(uc.AdminAuthenticationMiddleware).With(withParsedUserId).Get("/{userId}/activity", uc.UserActivityHandler)
+            })
 
-        r.With(uc.UserAuthenticationMiddleware).Get("/email", someProtectedHandler)
+            r.Route("/crypto", func(r chi.Router) {
+                r.Route("/key", func(r chi.Router) {
+                    r.With(uc.AdminAuthenticationMiddleware).Post("/rotate", sc.RotateCryptoKeyHandler)
+                    r.With(uc.AdminAuthenticationMiddleware).Post("/invalidate", sc.InvalidateCryptoKeyHandler)
+                }
+            })
+        })
     })
 
     fmt.Println("Starting server on :8080")
@@ -84,6 +107,7 @@ func withParsedUserId(next http.Handler) http.Handler {
     })
 }
 
+// Example of retrieving UserId from request context
 func someProtectedHandler(w http.ResponseWriter, r *http.Request) {
     // Retrieve userId from the context
     userId, ok := r.Context().Value("userId").(string)

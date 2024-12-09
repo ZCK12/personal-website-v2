@@ -88,8 +88,28 @@ func ValidateJWT(session *gocql.Session, tokenString string) (string, error) {
 }
 
 // RotateKey creates a new signing key by calling generateNewKey
-func RotateKey(session *gocql.Session) (*JWTToken, error) {
+func RotateKey(session *gocql.Session) (string, error) {
     return generateNewKey(session)
+}
+
+func InvalidateKey(session *gocql.Session) (string, error) {
+    // Fetch the latest key (ensure fetchLatestKey is implemented properly)
+    kid, secret, createdAt, err := fetchLatestKey(session)
+    if err != nil {
+        return "", fmt.Errorf("failed to fetch latest key: %v", err)
+    }
+
+    // Calculate the new valid_until time (invalidate immediately)
+    validUntil := time.Now().UTC()
+
+    // Update the latest key's valid_until time across all nodes
+    query := "UPDATE jwt_keys SET valid_until = ? WHERE kid = ?"
+    if err := session.Query(query, validUntil, kid).Consistency(gocql.All).Exec(); err != nil {
+        return "", fmt.Errorf("failed to invalidate key: %v", err)
+    }
+
+    // Return the invalidated key ID for logging or further action
+    return kid, nil
 }
 
 // newJWTToken creates a new JWT token instance
@@ -103,7 +123,7 @@ func newJWTToken(kid string, secret string, createdAt time.Time, validUntil time
 }
 
 // generateNewKey creates a new cryptographically secure key and stores it in the database
-func generateNewKey(session *gocql.Session) (*JWTToken, error) {
+func generateNewKey(session *gocql.Session) (string, error) {
     kid := gocql.TimeUUID().String()
 
     // Generate a cryptographically secure random secret
@@ -123,7 +143,7 @@ func generateNewKey(session *gocql.Session) (*JWTToken, error) {
         return nil, fmt.Errorf("failed to store new key: %v", err)
     }
 
-    return newJWTToken(kid, secret, createdAt, validUntil), nil
+    return kid, nil
 }
 
 // generateRandomSecret creates a cryptographically secure random secret of the specified length
@@ -138,7 +158,7 @@ func generateRandomSecret(length int) (string, error) {
 }
 
 // fetchLatestKey retrieves the latest signing key from the database
-func fetchLatestKey(session *gocql.Session) (*JWTToken, error) {
+func fetchLatestKey(session *gocql.Session) (string, error) {
     var kid gocql.UUID
     var secret string
     var createdAt, validUntil time.Time
@@ -151,5 +171,5 @@ func fetchLatestKey(session *gocql.Session) (*JWTToken, error) {
         return nil, fmt.Errorf("failed to fetch latest key: %v", err)
     }
 
-    return newJWTToken(kid.String(), secret, createdAt, validUntil), nil
+    return kid.String(), nil
 }
