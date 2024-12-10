@@ -1,7 +1,262 @@
-body {
-    font-family: Arial, sans-serif;
+/* home/static/css/styles.css */
+
+:root {
+    --terminal: #23b023;
+    --orange: #c76700;
+    --ash: #818181;
+    --grey: #454545;
+    --charcoal: #313131;
+    --black: #181818;
 }
 
-h1 {
-    color: #333;
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: 'Arial', sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: var(--charcoal); /* Set the background color */
+    color: var(--ash); /* Set text color to white or another light color for contrast */
+}
+
+/* NAVIGATION BAR */
+
+header .banner {
+    background-color: var(--orange);
+    position: sticky;
+    top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px;
+    z-index: 1000;
+    height: 60px;
+}
+
+header .banner .menu-button {
+    background-color: var(--charcoal);
+    border-radius: 5px;
+    width: 50px;
+    height: 50px;
+    border: none;
+    margin-right: 10px; /* Space between button and search bar */
+    cursor: pointer;
+}
+
+header .banner .search-bar {
+    background-color: var(--black);
+    color: var(--terminal);
+    font-family: 'Source Code Pro', monospace;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    width: 790px;
+    height: 50px;
+    max-width: 790px;
+    padding: 0px 19px 4px 19px;
+    font-size: 25px;
+    display: block;
+    box-sizing: border-box;
+}
+
+header .banner .search-bar:focus {
+    outline: none;
+    border: 1px solid var(--terminal);
+}
+
+/* MAIN CONTENT SECTION */
+
+.content {
+    display: flex;
+    justify-content: center; /* Center the flex container */
+    padding:  30px 0px 10px 0px; /* Optional: for some spacing around the content */
+}
+
+.main-section {
+    align-self: center;
+    width: 850px;
+    max-width: 850px;
+}
+
+.side-section {
+    width: 250px;
+}
+
+.side-section.left-side {
+    margin-top: 15px;
+    padding-right: 50px;
+}
+
+/* Styles for Sidebar Heading */
+.side-section.left-side h2 {
+    color: var(--ash); /* Adjust color as needed */
+    padding: 10px; /* Adds some padding around the heading */
+    margin-top: 0; /* Removes default margin from top */
+    margin-bottom: 0; /* Space below the heading */
+}
+
+.side-section.left-side nav ul {
+    list-style-type: none; /* Removes bullet points */
+    padding-left: 0;
+    margin-top: 0;
+}
+
+.side-section.left-side nav ul li a {
+    color: var(--ash); /* Adjust link color */
+    text-decoration: none; /* Removes underline */
+    display: block; /* Makes the entire area clickable */
+    padding: 7px 7px 7px 12px; /* Adds some padding for better clickability */
+    margin: 4px 30px 4px 4px;
+    font-size: 14pt;
+}
+
+/* Highlight active section link - Optional */
+.side-section.left-side nav ul li a:hover {
+    background-color: var(--grey);
+}
+
+.side-section.right-side {
+    padding-left: 50px;
+}
+
+/* MAIN CONTENT TEXT BLOCKS */
+
+.section-block {
+    margin-bottom: 20px; /* Spacing between blocks */
+    display: flex;
+    align-items: center;
+}
+
+.section-block img {
+    max-width: 250px;
+}
+
+/* Adjustments for image on the left */
+.section-block.left-image img {
+    margin-left: 0px;
+    margin-right: 25px;
+    order: -10;
+}
+
+/* Adjustments for image on the right */
+.section-block.right-image img {
+    margin-left: 25px;
+    margin-right: 0px;
+    order: 10;
+}
+
+.blog-list {
+    /* Styles for the blog list container */
+}
+
+.blog-post {
+    margin-bottom: 20px;
+    padding: 10px;
+}
+
+.blog-post h2 {
+    margin: 0;
+    padding: 0;
+    color: var(--terminal); /* Adjust as needed */
+}
+
+.blog-post h2 a {
+    text-decoration: none;
+    color: inherit;
+}
+
+.blog-post p {
+    color: var(--ash);
+}
+
+
+#autocomplete-suggestions {
+position: absolute;
+list-style-type: none;
+padding: 0;
+margin-top: 2px;
+background-color: white;
+border: 1px solid #ddd;
+width: calc(100% - 2px); /* Adjust width to match the search bar */
+}
+
+#autocomplete-suggestions li a {
+display: block;
+padding: 8px;
+text-decoration: none;
+color: black;
+}
+
+#autocomplete-suggestions li a:hover {
+background-color: #f0f0f0;
+}
+
+
+
+@media (max-width: 1490px) {
+    .content {
+        flex-direction: column;
+    }
+
+    header .banner .search-bar {
+        width: 84%;
+        max-width: 790px;
+    }
+
+    .side-section.left-side{
+        width: 90%;
+        max-width: 850px;
+        padding: 0px;
+        order: -1;
+    }
+
+    .side-section.right-side{
+        display: none;
+    }
+
+    /* Make main section and search bar take up most of the width */
+    .main-section{
+        width: 90%;
+    }
+
+    /* Adjust content container */
+    .content {
+        flex-direction: column;
+        align-items: center;
+    }
+}
+
+@media (max-width: 700px) {
+    .side-section,
+    header .banner .menu-button {
+        display: none;
+    }
+
+    header .banner .search-bar {
+        width: 90%;
+        max-width: 850px;
+    }
+
+    .section-block {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .section-block img {
+        max-width: 100%;
+        margin-bottom: 30px;
+    }
+
+    .section-block.left-image img {
+        margin-left: 0px;
+        margin-right: 0px;
+        order: -10;
+    }
+
+    .section-block.right-image img {
+        margin-left: 0px;
+        margin-right: 0px;
+        order: -10;
+    }
 }
